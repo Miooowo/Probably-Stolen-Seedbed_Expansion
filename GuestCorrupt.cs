@@ -13,7 +13,7 @@ namespace GuestMaidenCorrupt
             "MAIDEN_FEMALE", "MAIDEN_LOWER", "MAIDEN_VIRGIN", "MAIDEN_ANAL_VIRGIN",
             "MAIDEN_VIRGIN_LOST", "MAIDEN_ANAL_VIRGIN_LOST", "MAIDEN_BIG_BREAST", "MAIDEN_YOUNG",
             "MAIDEN_DAUGHTER", "MAIDEN_OVULATING", "MAIDEN_PREGNANT", "MAIDEN_PREGNANT_DAYS",
-            "MAIDEN_FORCE", "MAIDEN_INTEL", "MAIDEN_CHARM", "MAIDEN_NAME", "MAIDEN_SPRITE_SRC",
+            "MAIDEN_FORCE", "MAIDEN_INTEL", "MAIDEN_CHARM", "MAIDEN_NAME", "MAIDEN_IDENTITY", "MAIDEN_IDENTITY_KEY", "MAIDEN_AUGMENTED", "MAIDEN_SPRITE_SRC",
             "MAIDEN_FACTION", "MAIDEN_JOB", "MAIDEN_BODY", "MAIDEN_BREAST",
             "MAIDEN_AFFECTION", "MAIDEN_TRUST", "MAIDEN_HYPNOSIS", "MAIDEN_BRAND",
             "MAIDEN_INTERACT_CUR", "MAIDEN_INTERACT_MAX", "TRAIN_VALUE",
@@ -31,6 +31,8 @@ namespace GuestMaidenCorrupt
         static string pendingFaction;
         static GameItem pendingMaiden;
         static GameItem pendingTentacle;
+        static int chanceFrame = -1;
+        static GameItem chanceItem;
 
         public static void Register()
         {
@@ -40,7 +42,19 @@ namespace GuestMaidenCorrupt
             }
 
             TentacleApi.RegisterCorruptible(ModEntry.ModId, IsCurrentGuest, Convert);
+            ModHook.OnWakingUpLate += BroodSync.OnMorningSync;
             registered = true;
+        }
+
+        public static void Unregister()
+        {
+            if (!registered)
+            {
+                return;
+            }
+
+            ModHook.OnWakingUpLate -= BroodSync.OnMorningSync;
+            registered = false;
         }
 
         public static void WriteChance(RichTextBuilder builder, GameItem item)
@@ -50,6 +64,15 @@ namespace GuestMaidenCorrupt
                 return;
             }
 
+            // 防重复：同一帧内同一顾客只追加一行。主游戏里 GameItemElement.GetTooltip / GetTooltipAdvanced
+            // 都会调用 ModSourceHelper.CreateTooltip，顾客窗口会走两条路径各写一次，导致成功率显示两行。
+            if (chanceItem == item && chanceFrame == Time.frameCount)
+            {
+                return;
+            }
+
+            chanceItem = item;
+            chanceFrame = Time.frameCount;
             try
             {
                 int half = GuestChance.Of(
@@ -415,6 +438,7 @@ namespace GuestMaidenCorrupt
                 pendingFaction = null;
                 pendingMaiden = maiden;
                 pendingText = "侵蚀成功，沦为电子苗床。";
+                BroodSync.MarkCaptured(TentacleApi.GetName(maiden), ItemFactory.GetStr(maiden, "MAIDEN_IDENTITY_KEY"));
                 return maiden;
             }
 
@@ -422,6 +446,7 @@ namespace GuestMaidenCorrupt
             pendingFaction = faction;
             pendingMaiden = maiden;
             pendingText = "侵蚀成功，顾客沦为了你的苗床。";
+            BroodSync.MarkCaptured(TentacleApi.GetName(maiden), ItemFactory.GetStr(maiden, "MAIDEN_IDENTITY_KEY"));
             return maiden;
         }
 

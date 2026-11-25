@@ -22,6 +22,7 @@ namespace GuestMaidenCorrupt
 
         public void OnDisable()
         {
+            GuestCorrupt.Unregister();
             if (harmony != null)
             {
                 harmony.UnpatchAll(ModId);
