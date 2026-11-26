@@ -34,6 +34,16 @@ static class Program
         Check(GuestChance.Of(0, 0, 0, false, -4) == 0, "负信任低于 0 时钳到 0%");
         Check(GuestChance.Of(1, -4, 10, false, 2) == 10, "声望 1、好感 -4、幸运 10、信任 2 是 5%");
         Check(GuestChance.Of(0, -3, 0, true, 4) == 31, "负信任先和使用过的精液相加再钳制");
+        Check(GuestChance.ChargeHalf(100) == 10, "100 淫力是 5%");
+        Check(GuestChance.ChargeHalf(0) == -100, "0 淫力比 100 少 50%");
+        Check(GuestChance.ChargeHalf(99) == 8, "99 淫力是 4%");
+        Check(GuestChance.ChargeHalf(101) == 11, "101 淫力是 5.5%");
+        Check(GuestChance.ChargeHalf(90) == -1, "90 淫力是 -0.5%");
+        Check(GuestChance.ChargeHalf(200) == 120, "200 淫力是 60%");
+        Check(GuestChance.Of(0, 0, 0, false, 0, 100) == 10, "只有 100 淫力时成功率是 5%");
+        Check(GuestChance.Of(0, 0, 0, false, 0, 0) == 0, "0 淫力把负加成钳到 0%");
+        Check(GuestChance.Of(0, 0, 0, false, 0, 110) == 21, "110 淫力是 10.5%");
+        Check(GuestChance.Of(1, -4, 10, false, 0, 100) == 18, "原有 4% 再加 100 淫力的 5%");
         MaidenOutput.Shares plain = MaidenOutput.Weight(0, 0);
         Check(plain.Uncapped == 0 && plain.Capped == 5 && plain.Ruined == 38 && plain.Corrupt == 38 && plain.Normal == 19, "未喂养时无限制 0、受限 5、低质量 76、普通 19");
         MaidenOutput.Shares onePart = MaidenOutput.Weight(1, 0);

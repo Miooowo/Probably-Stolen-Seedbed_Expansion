@@ -31,6 +31,7 @@ namespace GuestMaidenCorrupt
         static string pendingFaction;
         static GameItem pendingMaiden;
         static GameItem pendingTentacle;
+        static int realCharge = -1;
 
         public static void Register()
         {
@@ -43,7 +44,7 @@ namespace GuestMaidenCorrupt
             registered = true;
         }
 
-        public static void WriteChance(RichTextBuilder builder, GameItem item)
+        public static void WriteChance(RichTextBuilder builder, GameItem item, GameItem tentacle = null)
         {
             if (builder == null || !IsCurrentGuest(item))
             {
@@ -52,12 +53,14 @@ namespace GuestMaidenCorrupt
 
             try
             {
+                int charge = tentacle == null ? 0 : CorruptTentacle.GetCharge(tentacle);
                 int half = GuestChance.Of(
                     FactionReputation.Get(TentacleApi.GetFaction(item)),
                     TentacleApi.GetAffection(item),
                     HealthData.GetLuck(),
                     SemenFed(),
-                    TentacleApi.GetTrust(item));
+                    TentacleApi.GetTrust(item),
+                    charge);
                 builder.AddLine(
                     "侵蚀成功率 " + GuestChance.Format(half),
                     true,
@@ -212,6 +215,37 @@ namespace GuestMaidenCorrupt
         public static void NoteTentacle(GameItem tentacle)
         {
             pendingTentacle = tentacle;
+            realCharge = tentacle == null ? -1 : CorruptTentacle.GetCharge(tentacle);
+        }
+
+        public static void LiftGuestCharge(GameItem tentacle, GameItem target)
+        {
+            if (tentacle == null || realCharge >= 100 || !IsCurrentGuest(target))
+            {
+                return;
+            }
+
+            CorruptTentacle.SetCharge(tentacle, 100);
+        }
+
+        public static void RestoreGuestCharge(GameItem tentacle, bool spent)
+        {
+            int saved = realCharge;
+            realCharge = -1;
+            if (saved < 0 || saved >= 100 || spent || tentacle == null)
+            {
+                return;
+            }
+
+            try
+            {
+                CorruptTentacle.SetCharge(tentacle, saved);
+                CorruptTentacle.RefreshTooltip(tentacle);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 恢复淫力失败: " + ex.Message);
+            }
         }
 
         public static bool TryClaimBrood(GameItem it, out string where)
@@ -382,7 +416,8 @@ namespace GuestMaidenCorrupt
             int affection = TentacleApi.GetAffection(guest);
             int luck = HealthData.GetLuck();
             int trust = TentacleApi.GetTrust(guest);
-            int chance = GuestChance.Of(FactionReputation.Get(faction), affection, luck, fed, trust);
+            int charge = realCharge >= 0 ? realCharge : 0;
+            int chance = GuestChance.Of(FactionReputation.Get(faction), affection, luck, fed, trust, charge);
             int roll = UnityEngine.Random.Range(0, GuestChance.Full);
             if (!GuestChance.Succeeds(chance, roll))
             {

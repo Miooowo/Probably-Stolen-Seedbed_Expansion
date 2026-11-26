@@ -1,5 +1,9 @@
+using System;
+using System.Collections.Generic;
 using HarmonyLib;
+using MidnightPawn.Api;
 using MidnightPawn.Game;
+using UnityEngine;
 
 namespace GuestMaidenCorrupt
 {
@@ -22,13 +26,15 @@ namespace GuestMaidenCorrupt
     [HarmonyPatch(typeof(CorruptTentacle), "TryCorrupt")]
     static class FleeAfterSuccessPatch
     {
-        static void Prefix(GameItem tentacle)
+        static void Prefix(GameItem tentacle, GameItem target)
         {
             GuestCorrupt.NoteTentacle(tentacle);
+            GuestCorrupt.LiftGuestCharge(tentacle, target);
         }
 
-        static void Postfix(GameItem tentacle)
+        static void Postfix(GameItem tentacle, bool __result)
         {
+            GuestCorrupt.RestoreGuestCharge(tentacle, __result);
             GuestCorrupt.FinishDelivery(tentacle);
         }
     }
@@ -174,7 +180,8 @@ namespace GuestMaidenCorrupt
                     RenderHandler.ColorPalette.Red);
             }
 
-            GuestCorrupt.WriteChance(customBuilder, guest);
+            GameItem tentacle = targetItem != null && targetItem.identifier == "corrupt_tentacle" ? targetItem : sourceItem;
+            GuestCorrupt.WriteChance(customBuilder, guest, tentacle);
             __result = customBuilder.Build();
             return false;
         }
@@ -196,6 +203,155 @@ namespace GuestMaidenCorrupt
             }
             catch
             {
+                __result = false;
+            }
+
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(CorruptTentacle), nameof(CorruptTentacle.GetCharge))]
+    static class ChargeReadPatch
+    {
+        static bool Prefix(GameItem it, ref int __result)
+        {
+            if (it == null)
+            {
+                __result = 0;
+                return false;
+            }
+
+            int raw = ItemFactory.GetInt(it, "TENTACLE_CHARGE");
+            __result = raw < 0 ? 0 : raw;
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(CorruptTentacle), nameof(CorruptTentacle.SetCharge))]
+    static class ChargeWritePatch
+    {
+        static bool Prefix(GameItem it, int v)
+        {
+            if (it != null)
+            {
+                if (v < 0)
+                {
+                    v = 0;
+                }
+
+                ItemFactory.SetInt(it, "TENTACLE_CHARGE", v);
+            }
+
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(TentacleApi), nameof(TentacleApi.AddCharge))]
+    static class ChargeAddPatch
+    {
+        static bool Prefix(GameItem tentacle, int v)
+        {
+            if (tentacle == null)
+            {
+                return false;
+            }
+
+            int next = CorruptTentacle.GetCharge(tentacle) + v;
+            if (next < 0)
+            {
+                next = 0;
+            }
+
+            CorruptTentacle.SetCharge(tentacle, next);
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(CorruptTentacle), nameof(CorruptTentacle.DailyRecharge))]
+    static class ChargeDailyPatch
+    {
+        static bool Prefix()
+        {
+            try
+            {
+                ItemLife.Prune(CorruptTentacle.Instances);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 清理触手失败: " + ex.Message);
+            }
+
+            GameItem[] list;
+            try
+            {
+                list = CorruptTentacle.Instances.ToArray();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 读取触手失败: " + ex.Message);
+                return false;
+            }
+
+            foreach (GameItem tentacle in list)
+            {
+                if (tentacle == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    CorruptTentacle.SetCharge(tentacle, CorruptTentacle.GetCharge(tentacle) + 10);
+                    CorruptTentacle.RefreshTooltip(tentacle);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[苗床顾客侵蚀] 每日淫力失败: " + ex.Message);
+                }
+            }
+
+            return false;
+        }
+    }
+
+    [HarmonyPatch(typeof(CorruptTentacle), nameof(CorruptTentacle.OnSemenUsed))]
+    static class ChargeSemenPatch
+    {
+        static int frame = -1;
+        static readonly HashSet<GameItem> used = new HashSet<GameItem>();
+
+        static bool Prefix(GameItem tentacle, GameItem semen, ref bool __result)
+        {
+            if (tentacle == null)
+            {
+                __result = false;
+                return false;
+            }
+
+            int now = Time.frameCount;
+            if (now != frame)
+            {
+                frame = now;
+                used.Clear();
+            }
+
+            if (semen != null && !used.Add(semen))
+            {
+                __result = false;
+                return false;
+            }
+
+            try
+            {
+                CorruptTentacle.SetCharge(tentacle, CorruptTentacle.GetCharge(tentacle) + 10);
+                CorruptTentacle.RefreshTooltip(tentacle);
+                int charge = CorruptTentacle.GetCharge(tentacle);
+                Toast.Show("在苗床的子宫中呆了一晚上，并且混合了淫水的触手精液充满了淫力，被侵蚀性触手重新吸收，淫力 +10（" + charge + "）");
+                __result = true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 精液充能失败: " + ex.Message);
                 __result = false;
             }
 

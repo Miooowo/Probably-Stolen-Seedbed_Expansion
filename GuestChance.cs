@@ -7,9 +7,23 @@ namespace GuestMaidenCorrupt
         public const int FedHalf = 30;
         public const int Full = 200;
 
-        public static int Of(int reputation, int affection, int luck, bool fed = false, int trust = 0)
+        public static int ChargeHalf(int charge)
+        {
+            if (charge < 0)
+            {
+                charge = 0;
+            }
+
+            return charge * 10 / 100 + (charge - 100);
+        }
+
+        public static int Of(int reputation, int affection, int luck, bool fed = false, int trust = 0, int charge = -1)
         {
             int half = reputation * 2 + affection + luck + trust + (fed ? FedHalf : 0);
+            if (charge >= 0)
+            {
+                half += ChargeHalf(charge);
+            }
             if (half < 0)
             {
                 return 0;
