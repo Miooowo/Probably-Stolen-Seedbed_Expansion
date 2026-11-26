@@ -18,7 +18,7 @@ namespace GuestMaidenCorrupt
                 return true;
             }
 
-            __result = true;
+            __result = !it.IsTag("ALREADY_CAPTURED");
             return false;
         }
     }
@@ -129,12 +129,26 @@ namespace GuestMaidenCorrupt
         }
     }
 
-    [HarmonyPatch(typeof(StoreStation), nameof(StoreStation.StartDay))]
-    static class ElectronicMaidenDayPatch
+    [HarmonyPatch(typeof(TentacleBody), "NightlyTick")]
+    [HarmonyPriority(Priority.Last)]
+    static class ElectronicMaidenSettlePatch
     {
-        static void Postfix()
+        static void Postfix(GameGridInventory input, GameGridInventory output)
         {
-            ElectronicMaiden.OnDay();
+            if (input == null || output == null || input.childItems == null)
+            {
+                return;
+            }
+
+            var children = input.childItems;
+            for (int i = 0; i < children.Count; i++)
+            {
+                GameItem maiden = children[i];
+                if (maiden != null)
+                {
+                    ElectronicMaiden.Settle(maiden, output);
+                }
+            }
         }
     }
 

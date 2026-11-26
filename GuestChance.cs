@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace GuestMaidenCorrupt
 {
@@ -100,119 +101,39 @@ namespace GuestMaidenCorrupt
         }
     }
 
+    // 电子苗床产出模型（梯度式，无概率）。
+    //   核心目的：喂电子零件(common_electronic) → 解锁「限制AI芯片」(capped)；
+    //             喂「限制AI芯片」(capped) → 额外产出「不限制AI芯片」(uncapped，更高级)。
+    //   硬门槛：喂满对应物品才启动；每苗床各自记一个 tick，每 2 天结算一次。
     public static class MaidenOutput
     {
-        public const int DayPercent = 20;
-        public const string UncappedId = "system_uncapped_neural_core";
-        public const string CappedId = "system_capped_neural_core";
-        public const string RuinedId = "system_module_ruined";
-        public const string CorruptId = "system_module_corrupt";
+        public const string CappedId = "system_capped_neural_core";     // 限制AI芯片
+        public const string UncappedId = "system_uncapped_neural_core"; // 不限制AI芯片
 
-        public static readonly string[] NormalIds =
+        public const int PartsThreshold = 5;   // 电子零件硬门槛（喂满 5 个）
+        public const int CoresThreshold = 5;   // 限制AI芯片硬门槛（喂满 5 个）
+        public const int Interval = 2;          // 每 2 天（每苗床自记 tick）
+
+        // 第 tick 夜应产出的物品 id（硬门槛 + 周期，无随机）。
+        public static List<string> Due(int parts, int cores, int tick)
         {
-            "system_module_performance",
-            "system_module_efficiancy",
-            "system_module_quality",
-            "system_module_overclock",
-            "system_module_eco",
-            "system_module_fineness",
-            "system_module_streamlining"
-        };
-
-        public struct Shares
-        {
-            public int Uncapped;
-            public int Capped;
-            public int Ruined;
-            public int Corrupt;
-            public int Normal;
-        }
-
-        public static int UncappedPercent(int neuralFeeds)
-        {
-            if (neuralFeeds < 0)
+            var due = new List<string>();
+            if (tick <= 0 || tick % Interval != 0)
             {
-                neuralFeeds = 0;
+                return due;
             }
 
-            int percent = neuralFeeds * 5;
-            return percent > 50 ? 50 : percent;
-        }
-
-        public static int LowShare(int electronicFeeds)
-        {
-            if (electronicFeeds < 0)
+            if (parts >= PartsThreshold)
             {
-                electronicFeeds = 0;
+                due.Add(CappedId);
             }
 
-            int share = 80 - electronicFeeds * 10;
-            return share < 0 ? 0 : share;
-        }
-
-        public static Shares Weight(int electronicFeeds, int neuralFeeds)
-        {
-            int uncapped = UncappedPercent(neuralFeeds);
-            int rest = 100 - uncapped - 5;
-            int low = rest * LowShare(electronicFeeds) / 100;
-            int ruined = low / 2;
-            return new Shares
+            if (cores >= CoresThreshold)
             {
-                Uncapped = uncapped,
-                Capped = 5,
-                Ruined = ruined,
-                Corrupt = low - ruined,
-                Normal = rest - low
-            };
-        }
-
-        public static string Pick(Shares shares, int roll, int normalIndex)
-        {
-            if (roll < 0)
-            {
-                roll = 0;
+                due.Add(UncappedId);
             }
 
-            if (roll > 99)
-            {
-                roll = 99;
-            }
-
-            int cursor = shares.Uncapped;
-            if (roll < cursor)
-            {
-                return UncappedId;
-            }
-
-            cursor += shares.Capped;
-            if (roll < cursor)
-            {
-                return CappedId;
-            }
-
-            cursor += shares.Ruined;
-            if (roll < cursor)
-            {
-                return RuinedId;
-            }
-
-            cursor += shares.Corrupt;
-            if (roll < cursor)
-            {
-                return CorruptId;
-            }
-
-            if (NormalIds.Length == 0)
-            {
-                return null;
-            }
-
-            if (normalIndex < 0)
-            {
-                normalIndex = 0;
-            }
-
-            return NormalIds[normalIndex % NormalIds.Length];
+            return due;
         }
     }
 }

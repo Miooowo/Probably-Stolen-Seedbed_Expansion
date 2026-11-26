@@ -13,7 +13,7 @@ namespace GuestMaidenCorrupt
             "MAIDEN_FEMALE", "MAIDEN_LOWER", "MAIDEN_VIRGIN", "MAIDEN_ANAL_VIRGIN",
             "MAIDEN_VIRGIN_LOST", "MAIDEN_ANAL_VIRGIN_LOST", "MAIDEN_BIG_BREAST", "MAIDEN_YOUNG",
             "MAIDEN_DAUGHTER", "MAIDEN_OVULATING", "MAIDEN_PREGNANT", "MAIDEN_PREGNANT_DAYS",
-            "MAIDEN_FORCE", "MAIDEN_INTEL", "MAIDEN_CHARM", "MAIDEN_NAME", "MAIDEN_SPRITE_SRC",
+            "MAIDEN_FORCE", "MAIDEN_INTEL", "MAIDEN_CHARM", "MAIDEN_NAME", "MAIDEN_IDENTITY", "MAIDEN_IDENTITY_KEY", "MAIDEN_AUGMENTED", "MAIDEN_SPRITE_SRC",
             "MAIDEN_FACTION", "MAIDEN_JOB", "MAIDEN_BODY", "MAIDEN_BREAST",
             "MAIDEN_AFFECTION", "MAIDEN_TRUST", "MAIDEN_HYPNOSIS", "MAIDEN_BRAND",
             "MAIDEN_INTERACT_CUR", "MAIDEN_INTERACT_MAX", "TRAIN_VALUE",
@@ -32,6 +32,8 @@ namespace GuestMaidenCorrupt
         static GameItem pendingMaiden;
         static GameItem pendingTentacle;
         static int realCharge = -1;
+        static int chanceFrame = -1;
+        static GameItem chanceItem;
 
         public static void Register()
         {
@@ -41,16 +43,56 @@ namespace GuestMaidenCorrupt
             }
 
             TentacleApi.RegisterCorruptible(ModEntry.ModId, IsCurrentGuest, Convert);
+            ModHook.OnWakingUpLate += BroodSync.OnMorningSync;
             registered = true;
         }
 
-        public static void WriteChance(RichTextBuilder builder, GameItem item, GameItem tentacle = null)
+        public static void Unregister()
         {
-            if (builder == null || !IsCurrentGuest(item))
+            if (!registered)
             {
                 return;
             }
 
+            ModHook.OnWakingUpLate -= BroodSync.OnMorningSync;
+            registered = false;
+        }
+
+        public static void WriteChance(RichTextBuilder builder, GameItem item, GameItem tentacle = null)
+        {
+            if (builder == null || item == null)
+            {
+                return;
+            }
+
+            bool guest = IsCurrentGuest(item);
+            if (!guest && !item.IsTag("MAIDEN_FEMALE"))
+            {
+                return;
+            }
+
+            // 防重复：同一帧内同一物品只追加一次。主游戏里 GameItemElement.GetTooltip / GetTooltipAdvanced
+            // 都会调用 ModSourceHelper.CreateTooltip，会走两条路径各写一次，导致重复行。
+            if (chanceItem == item && chanceFrame == Time.frameCount)
+            {
+                return;
+            }
+
+            chanceItem = item;
+            chanceFrame = Time.frameCount;
+
+            if (guest)
+            {
+                WriteGuestChance(builder, item, tentacle);
+            }
+            else
+            {
+                WriteMaidenNote(builder, item);
+            }
+        }
+
+        static void WriteGuestChance(RichTextBuilder builder, GameItem item, GameItem tentacle)
+        {
             try
             {
                 int charge = tentacle == null ? 0 : CorruptTentacle.GetCharge(tentacle);
@@ -76,6 +118,60 @@ namespace GuestMaidenCorrupt
             catch (Exception ex)
             {
                 Debug.LogWarning("[苗床顾客侵蚀] 显示成功率失败: " + ex.Message);
+            }
+        }
+
+        static void WriteMaidenNote(RichTextBuilder builder, GameItem item)
+        {
+            try
+            {
+                // 只对「从顾客抓来的苗床」标注（有身份 key 的才算；女儿等没有）。
+                string key = ItemFactory.GetStr(item, "MAIDEN_IDENTITY_KEY");
+                if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(item.name))
+                {
+                    builder.AddLine(
+                        "顾客：" + item.name,
+                        true,
+                        RenderHandler.ColorPalette.LightCyan,
+                        true,
+                        false,
+                        false,
+                        false,
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1));
+                }
+
+                // 电子苗床的喂养进度（保持 5/5 显示，不隐藏）。
+                if (item.IsTag(ElectronicMaiden.Marker))
+                {
+                    builder.AddLine(
+                        "电子零件 " + ElectronicMaiden.PartsOf(item) + "/" + MaidenOutput.PartsThreshold,
+                        true,
+                        RenderHandler.ColorPalette.LightOrange,
+                        false,
+                        false,
+                        false,
+                        false,
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1));
+                    builder.AddLine(
+                        "神经核心 " + ElectronicMaiden.CoresOf(item) + "/" + MaidenOutput.CoresThreshold,
+                        true,
+                        RenderHandler.ColorPalette.LightOrange,
+                        false,
+                        false,
+                        false,
+                        false,
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 显示苗床备注失败: " + ex.Message);
             }
         }
 
@@ -445,11 +541,12 @@ namespace GuestMaidenCorrupt
 
             if (augmented)
             {
-                ElectronicMaiden.Attach(maiden);
+                ElectronicMaiden.Setup(maiden);
                 pendingSuccess = true;
                 pendingFaction = null;
                 pendingMaiden = maiden;
                 pendingText = "侵蚀成功，沦为电子苗床。";
+                BroodSync.MarkCaptured(TentacleApi.GetName(maiden), ItemFactory.GetStr(maiden, "MAIDEN_IDENTITY_KEY"));
                 return maiden;
             }
 
@@ -457,6 +554,7 @@ namespace GuestMaidenCorrupt
             pendingFaction = faction;
             pendingMaiden = maiden;
             pendingText = "侵蚀成功，顾客沦为了你的苗床。";
+            BroodSync.MarkCaptured(TentacleApi.GetName(maiden), ItemFactory.GetStr(maiden, "MAIDEN_IDENTITY_KEY"));
             return maiden;
         }
 
