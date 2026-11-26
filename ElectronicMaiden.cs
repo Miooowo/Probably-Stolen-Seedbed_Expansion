@@ -1,6 +1,4 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using MidnightPawn.Game;
 using UnityEngine;
 
@@ -11,39 +9,19 @@ namespace GuestMaidenCorrupt
         public const string Marker = "ELECTRONIC_MAIDEN";
         const string Parts = "ELECTRONIC_MAIDEN_PARTS";
         const string Cores = "ELECTRONIC_MAIDEN_CORES";
+        const string Tick = "ELECTRONIC_MAIDEN_TICK";
         const string ElectronicId = "common_electronic";
 
-        public static void Attach(GameItem maiden)
+        // 抓获改造体时挂上标记 + 喂食回调。不再造容器窗口（产出改到巢穴产出区）。
+        public static void Setup(GameItem maiden)
         {
             if (maiden == null)
             {
                 return;
             }
 
-            GameGridInventory grid = new GameGridInventory(1, 1);
-            PixelWindow window = MachineHelper.CreateMachineryWindow(
-                true,
-                MachineHelper.Panel("输出", grid, "output"));
-            maiden.SetContentWindow(window);
-            maiden.EnableTag("CONTAINER_TAG");
             maiden.EnableTag(Marker);
-            grid.mayInventoryAddItemFunc = (_, __) => false;
             Bind(maiden);
-        }
-
-        public static void OnDay()
-        {
-            foreach (GameItem maiden in Find())
-            {
-                try
-                {
-                    Produce(maiden);
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning("[苗床顾客侵蚀] 电子苗床产出失败: " + ex.Message);
-                }
-            }
         }
 
         public static void OnLoad(GameItem item)
@@ -54,67 +32,59 @@ namespace GuestMaidenCorrupt
             }
         }
 
-        static void Produce(GameItem maiden)
+        // 每夜结算（由 TentacleBody.NightlyTick 后置调用）：梯度式产出模组到巢穴产出区。
+        public static void Settle(GameItem maiden, GameGridInventory output)
         {
-            Bind(maiden);
-            GameInventory grid = Output(maiden);
-            if (grid == null || Occupied(grid))
+            if (maiden == null || output == null || !maiden.IsTag(Marker))
             {
                 return;
             }
 
-            if (UnityEngine.Random.Range(0, 100) >= MaidenOutput.DayPercent)
+            int tick = Read(maiden, Tick) + 1;
+            maiden.ModifyTag(Tick, s =>
             {
-                return;
-            }
+                s.Enable();
+                s.SetInt(tick);
+            }, false);
 
-            MaidenOutput.Shares shares = MaidenOutput.Weight(Read(maiden, Parts), Read(maiden, Cores));
-            string id = MaidenOutput.Pick(
-                shares,
-                UnityEngine.Random.Range(0, 100),
-                UnityEngine.Random.Range(0, MaidenOutput.NormalIds.Length));
-            if (string.IsNullOrEmpty(id))
+            foreach (string id in MaidenOutput.Due(Read(maiden, Parts), Read(maiden, Cores), tick))
             {
-                return;
-            }
+                try
+                {
+                    GameItem made = DirectoryMaster.Item(id, true);
+                    if (made == null)
+                    {
+                        continue;
+                    }
 
-            GameItem made = DirectoryMaster.Item(id, true);
-            if (made == null)
-            {
-                return;
+                    if (TentacleBody.PlaceInto(output, made))
+                    {
+                        Debug.Log("[苗床顾客侵蚀] 电子苗床产出 " + id);
+                    }
+                    else
+                    {
+                        made.Destroy();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[苗床顾客侵蚀] 电子苗床产出失败: " + ex.Message);
+                }
             }
-
-            Deposit(grid, made);
-            Debug.Log("[苗床顾客侵蚀] 电子苗床产出 " + id);
         }
 
-        static void Deposit(GameInventory grid, GameItem made)
+        public static int PartsOf(GameItem item)
         {
-            grid.mayInventoryAddItemFunc = (item, _) => ReferenceEquals(item, made);
-            try
-            {
-                if (!GraphUtils.CanAccept(grid, made))
-                {
-                    made.Destroy();
-                    return;
-                }
+            return Read(item, Parts);
+        }
 
-                GraphUtils.EmporiumTryAdd(grid, made);
-            }
-            finally
-            {
-                grid.mayInventoryAddItemFunc = (_, __) => false;
-            }
+        public static int CoresOf(GameItem item)
+        {
+            return Read(item, Cores);
         }
 
         static void Bind(GameItem maiden)
         {
-            GameInventory grid = Output(maiden);
-            if (grid != null)
-            {
-                grid.mayInventoryAddItemFunc = (_, __) => false;
-            }
-
             maiden.mayItemTargetThisFunc = (dragged, _) => IsFeed(dragged);
             maiden.canItemTargetThisFunc = (dragged, _) => IsFeed(dragged);
             maiden.onItemTargetThisFunc = Consume;
@@ -127,14 +97,25 @@ namespace GuestMaidenCorrupt
                 return;
             }
 
+            string tag;
+            int threshold;
             if (dragged.identifier == ElectronicId)
             {
-                Add(maiden, Parts);
+                tag = Parts;
+                threshold = MaidenOutput.PartsThreshold;
             }
-            else if (dragged.identifier == MaidenOutput.CappedId)
+            else
             {
-                Add(maiden, Cores);
+                tag = Cores;
+                threshold = MaidenOutput.CoresThreshold;
             }
+
+            if (Read(maiden, tag) >= threshold)
+            {
+                return;
+            }
+
+            Add(maiden, tag);
 
             try
             {
@@ -168,46 +149,6 @@ namespace GuestMaidenCorrupt
             return item.identifier == ElectronicId || item.identifier == MaidenOutput.CappedId;
         }
 
-        static GameInventory Output(GameItem maiden)
-        {
-            try
-            {
-                return MachineHelper.GetSlot(maiden, 0);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[苗床顾客侵蚀] 读取电子苗床输出格失败: " + ex.Message);
-                return null;
-            }
-        }
-
-        static bool Occupied(GameInventory grid)
-        {
-            try
-            {
-                IEnumerable items = grid.childItems;
-                if (items == null)
-                {
-                    return false;
-                }
-
-                foreach (object item in items)
-                {
-                    if (item != null)
-                    {
-                        return true;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[苗床顾客侵蚀] 检查输出格失败: " + ex.Message);
-                return true;
-            }
-
-            return false;
-        }
-
         static int Read(GameItem item, string tag)
         {
             if (item == null || !item.IsTag(tag))
@@ -228,73 +169,6 @@ namespace GuestMaidenCorrupt
                 state.SetInt(next);
             }, false);
             Debug.Log("[苗床顾客侵蚀] 电子苗床喂养 " + tag + " " + next);
-        }
-
-        static List<GameItem> Find()
-        {
-            var found = new List<GameItem>();
-            var seen = new HashSet<GameItem>();
-            try
-            {
-                if (EmporiumEntry.Instance != null)
-                {
-                    Collect(EmporiumEntry.Instance.GetAllItems(), found, seen);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[苗床顾客侵蚀] 查找店铺里的电子苗床失败: " + ex.Message);
-            }
-
-            try
-            {
-                List<GameItem> bodies = TentacleBody.InstancesSnapshot();
-                if (bodies == null)
-                {
-                    return found;
-                }
-
-                foreach (GameItem body in bodies)
-                {
-                    List<GameGridInventory> grids = body == null ? null : TentacleBody.GridsOf(body);
-                    if (grids == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (GameGridInventory grid in grids)
-                    {
-                        if (grid == null)
-                        {
-                            continue;
-                        }
-
-                        Collect(GraphUtils.FindAllChildrenType<GameItem>(grid), found, seen);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogWarning("[苗床顾客侵蚀] 查找触手本体里的电子苗床失败: " + ex.Message);
-            }
-
-            return found;
-        }
-
-        static void Collect(IEnumerable<GameItem> items, List<GameItem> found, HashSet<GameItem> seen)
-        {
-            if (items == null)
-            {
-                return;
-            }
-
-            foreach (GameItem item in items)
-            {
-                if (item != null && item.IsTag(Marker) && seen.Add(item))
-                {
-                    found.Add(item);
-                }
-            }
         }
     }
 }

@@ -59,13 +59,19 @@ namespace GuestMaidenCorrupt
 
         public static void WriteChance(RichTextBuilder builder, GameItem item)
         {
-            if (builder == null || !IsCurrentGuest(item))
+            if (builder == null || item == null)
             {
                 return;
             }
 
-            // 防重复：同一帧内同一顾客只追加一行。主游戏里 GameItemElement.GetTooltip / GetTooltipAdvanced
-            // 都会调用 ModSourceHelper.CreateTooltip，顾客窗口会走两条路径各写一次，导致成功率显示两行。
+            bool guest = IsCurrentGuest(item);
+            if (!guest && !item.IsTag("MAIDEN_FEMALE"))
+            {
+                return;
+            }
+
+            // 防重复：同一帧内同一物品只追加一次。主游戏里 GameItemElement.GetTooltip / GetTooltipAdvanced
+            // 都会调用 ModSourceHelper.CreateTooltip，会走两条路径各写一次，导致重复行。
             if (chanceItem == item && chanceFrame == Time.frameCount)
             {
                 return;
@@ -73,6 +79,19 @@ namespace GuestMaidenCorrupt
 
             chanceItem = item;
             chanceFrame = Time.frameCount;
+
+            if (guest)
+            {
+                WriteGuestChance(builder, item);
+            }
+            else
+            {
+                WriteMaidenNote(builder, item);
+            }
+        }
+
+        static void WriteGuestChance(RichTextBuilder builder, GameItem item)
+        {
             try
             {
                 int half = GuestChance.Of(
@@ -96,6 +115,60 @@ namespace GuestMaidenCorrupt
             catch (Exception ex)
             {
                 Debug.LogWarning("[苗床顾客侵蚀] 显示成功率失败: " + ex.Message);
+            }
+        }
+
+        static void WriteMaidenNote(RichTextBuilder builder, GameItem item)
+        {
+            try
+            {
+                // 只对「从顾客抓来的苗床」标注（有身份 key 的才算；女儿等没有）。
+                string key = ItemFactory.GetStr(item, "MAIDEN_IDENTITY_KEY");
+                if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(item.name))
+                {
+                    builder.AddLine(
+                        "顾客：" + item.name,
+                        true,
+                        RenderHandler.ColorPalette.LightCyan,
+                        true,
+                        false,
+                        false,
+                        false,
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1));
+                }
+
+                // 电子苗床的喂养进度（保持 5/5 显示，不隐藏）。
+                if (item.IsTag(ElectronicMaiden.Marker))
+                {
+                    builder.AddLine(
+                        "电子零件 " + ElectronicMaiden.PartsOf(item) + "/" + MaidenOutput.PartsThreshold,
+                        true,
+                        RenderHandler.ColorPalette.LightOrange,
+                        false,
+                        false,
+                        false,
+                        false,
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1));
+                    builder.AddLine(
+                        "神经核心 " + ElectronicMaiden.CoresOf(item) + "/" + MaidenOutput.CoresThreshold,
+                        true,
+                        RenderHandler.ColorPalette.LightOrange,
+                        false,
+                        false,
+                        false,
+                        false,
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1),
+                        (RenderHandler.ColorPalette)(-1));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 显示苗床备注失败: " + ex.Message);
             }
         }
 
@@ -433,7 +506,7 @@ namespace GuestMaidenCorrupt
 
             if (augmented)
             {
-                ElectronicMaiden.Attach(maiden);
+                ElectronicMaiden.Setup(maiden);
                 pendingSuccess = true;
                 pendingFaction = null;
                 pendingMaiden = maiden;
