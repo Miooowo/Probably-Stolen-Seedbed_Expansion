@@ -14,7 +14,7 @@ namespace GuestMaidenCorrupt
                 return true;
             }
 
-            __result = true;
+            __result = !it.IsTag("ALREADY_CAPTURED");
             return false;
         }
     }
