@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using MidnightPawn.Game;
 using TMPro;
@@ -8,12 +9,19 @@ using UnityEngine.UI;
 namespace GuestMaidenCorrupt
 {
     // 立绘模组只把大窗口（StoreClientMono）换成当前那张图。
-    // 左上角是另一张：客人格进店时烤好并缓存的像素图，或仍握着原图的小立绘。
-    // 高清立绘管理器不再改这张缓存。这里在晚更新里抄大窗口当前的立绘。
+    // 左上角是小框。直接把高清大图塞进去会按九宫格/紧网格切开，
+    // 手机上大贴图还会撕成横条，底部伸出面板。这里先缩成一张
+    // 完整小图，再放进原来的框。
     static class HeaderPortrait
     {
+        const int FitSize = 128;
+
         static bool logged;
         static Sprite noted;
+        static Sprite fitted;
+        static Texture2D fittedTex;
+        static int fittedId;
+        static readonly Dictionary<int, Vector3> rendererScale = new Dictionary<int, Vector3>();
 
         public static void Ensure()
         {
@@ -181,37 +189,304 @@ namespace GuestMaidenCorrupt
                 return;
             }
 
-            if (image.sprite == big && (image.overrideSprite == null || image.overrideSprite == big))
+            Sprite sprite = Fit(big);
+            if (sprite == null)
+            {
+                return;
+            }
+
+            if (image.sprite == sprite && image.overrideSprite == null && image.type == Image.Type.Simple && !image.useSpriteMesh)
             {
                 return;
             }
 
             Vector2 size = image.rectTransform.sizeDelta;
+            image.type = Image.Type.Simple;
+            image.useSpriteMesh = false;
             image.preserveAspect = true;
-            image.sprite = big;
-            if (image.overrideSprite != null)
-            {
-                image.overrideSprite = null;
-            }
-
+            image.pixelsPerUnitMultiplier = 1f;
+            image.sprite = sprite;
+            image.overrideSprite = null;
             image.rectTransform.sizeDelta = size;
         }
 
         static void Assign(SpriteRenderer renderer, Sprite big)
         {
-            if (renderer == null || big == null || renderer.sprite == null || renderer.sprite == big)
+            if (renderer == null || big == null || renderer.sprite == null)
             {
                 return;
             }
 
+            Sprite sprite = Fit(big);
+            if (sprite == null || renderer.sprite == sprite)
+            {
+                return;
+            }
+
+            int id = renderer.GetInstanceID();
+            Vector3 scale;
+            if (!rendererScale.TryGetValue(id, out scale))
+            {
+                scale = renderer.transform.localScale;
+                rendererScale[id] = scale;
+            }
+
             float oldHeight = renderer.sprite.bounds.size.y;
-            Vector3 scale = renderer.transform.localScale;
-            renderer.sprite = big;
-            float newHeight = big.bounds.size.y;
+            renderer.sprite = sprite;
+            float newHeight = sprite.bounds.size.y;
             if (oldHeight > 0.01f && newHeight > 0.01f)
             {
-                renderer.transform.localScale = scale * (oldHeight / newHeight);
+                float factor = oldHeight / newHeight;
+                renderer.transform.localScale = new Vector3(scale.x * factor, scale.y * factor, scale.z);
             }
+        }
+
+        static Sprite Fit(Sprite big)
+        {
+            if (big == null || big.texture == null)
+            {
+                return null;
+            }
+
+            int id = big.GetInstanceID();
+            if (fitted != null && fittedId == id)
+            {
+                return fitted;
+            }
+
+            ClearFit();
+            Texture2D texture = Raster(big);
+            if (texture == null)
+            {
+                return null;
+            }
+
+            Sprite sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+            sprite.name = "guest-corner-fit";
+            sprite.hideFlags = HideFlags.HideAndDontSave;
+            texture.hideFlags = HideFlags.HideAndDontSave;
+            fitted = sprite;
+            fittedTex = texture;
+            fittedId = id;
+            return fitted;
+        }
+
+        static Texture2D Raster(Sprite big)
+        {
+            Texture source = big.texture;
+            float texW = source.width;
+            float texH = source.height;
+            if (texW < 1f || texH < 1f)
+            {
+                return null;
+            }
+
+            Rect region = big.textureRect;
+            if (region.width < 1f || region.height < 1f)
+            {
+                region = new Rect(0f, 0f, texW, texH);
+            }
+
+            region.x = Mathf.Clamp(region.x, 0f, texW - 1f);
+            region.y = Mathf.Clamp(region.y, 0f, texH - 1f);
+            region.width = Mathf.Clamp(region.width, 1f, texW - region.x);
+            region.height = Mathf.Clamp(region.height, 1f, texH - region.y);
+
+            int storedW = Block(region.width, region.height);
+            int storedH = Block(region.height, region.width);
+            Color32[] stored = ReadRegion(source, region, storedW, storedH);
+            if (stored == null)
+            {
+                return null;
+            }
+
+            if (!HasInk(stored))
+            {
+                stored = ReadRegion(source, new Rect(0f, 0f, texW, texH), storedW, storedH);
+                if (stored == null || !HasInk(stored))
+                {
+                    return null;
+                }
+            }
+
+            int visW;
+            int visH;
+            Color32[] visual = Orient(stored, storedW, storedH, big.packingRotation, out visW, out visH);
+            int drawW = Block(visW, visH);
+            int drawH = Block(visH, visW);
+            if (drawW != visW || drawH != visH)
+            {
+                visual = Scale(visual, visW, visH, drawW, drawH);
+            }
+
+            Color32[] canvas = new Color32[FitSize * FitSize];
+            int ox = (FitSize - drawW) / 2;
+            int oy = (FitSize - drawH) / 2;
+            for (int y = 0; y < drawH; y++)
+            {
+                int from = y * drawW;
+                int to = (oy + y) * FitSize + ox;
+                Array.Copy(visual, from, canvas, to, drawW);
+            }
+
+            Texture2D texture = new Texture2D(FitSize, FitSize, TextureFormat.RGBA32, false);
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.filterMode = FilterMode.Bilinear;
+            texture.anisoLevel = 0;
+            texture.SetPixels32(canvas);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        static int Block(float along, float other)
+        {
+            float aspect = other < 1f ? 1f : along / other;
+            int size = aspect >= 1f ? FitSize : Mathf.RoundToInt(FitSize * aspect);
+            size = Mathf.Clamp(size, 4, FitSize);
+            int pot = 4;
+            while (pot * 2 <= size)
+            {
+                pot *= 2;
+            }
+
+            return pot;
+        }
+
+        static Color32[] ReadRegion(Texture source, Rect region, int width, int height)
+        {
+            float texW = source.width;
+            float texH = source.height;
+            RenderTexture previous = RenderTexture.active;
+            RenderTexture buffer = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
+            buffer.filterMode = FilterMode.Bilinear;
+            buffer.wrapMode = TextureWrapMode.Clamp;
+            Texture2D read = null;
+            try
+            {
+                Vector2 scale = new Vector2(region.width / texW, region.height / texH);
+                Vector2 offset = new Vector2(region.x / texW, region.y / texH);
+                Graphics.Blit(source, buffer, scale, offset);
+                RenderTexture.active = buffer;
+                read = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                read.ReadPixels(new Rect(0f, 0f, width, height), 0, 0);
+                read.Apply(false, false);
+                return read.GetPixels32();
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(buffer);
+                if (read != null)
+                {
+                    UnityEngine.Object.Destroy(read);
+                }
+            }
+        }
+
+        static bool HasInk(Color32[] pixels)
+        {
+            for (int i = 0; i < pixels.Length; i += 16)
+            {
+                if (pixels[i].a > 8)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        static Color32[] Orient(Color32[] src, int width, int height, SpritePackingRotation rotation, out int outW, out int outH)
+        {
+            if (rotation == SpritePackingRotation.FlipHorizontal)
+            {
+                outW = width;
+                outH = height;
+                return FlipX(src, width, height);
+            }
+
+            if (rotation == SpritePackingRotation.FlipVertical)
+            {
+                outW = width;
+                outH = height;
+                return FlipY(src, width, height);
+            }
+
+            if (rotation == SpritePackingRotation.Rotate180)
+            {
+                outW = width;
+                outH = height;
+                return FlipY(FlipX(src, width, height), width, height);
+            }
+
+            outW = width;
+            outH = height;
+            return src;
+        }
+
+        static Color32[] FlipX(Color32[] src, int width, int height)
+        {
+            Color32[] dst = new Color32[src.Length];
+            for (int y = 0; y < height; y++)
+            {
+                int row = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    dst[row + (width - 1 - x)] = src[row + x];
+                }
+            }
+
+            return dst;
+        }
+
+        static Color32[] FlipY(Color32[] src, int width, int height)
+        {
+            Color32[] dst = new Color32[src.Length];
+            for (int y = 0; y < height; y++)
+            {
+                Array.Copy(src, y * width, dst, (height - 1 - y) * width, width);
+            }
+
+            return dst;
+        }
+
+        static Color32[] Scale(Color32[] src, int sw, int sh, int dw, int dh)
+        {
+            Color32[] dst = new Color32[dw * dh];
+            for (int y = 0; y < dh; y++)
+            {
+                int sy = sh < 2 ? 0 : y * (sh - 1) / (dh - 1);
+                for (int x = 0; x < dw; x++)
+                {
+                    int sx = sw < 2 ? 0 : x * (sw - 1) / (dw - 1);
+                    dst[y * dw + x] = src[sy * sw + sx];
+                }
+            }
+
+            return dst;
+        }
+
+        static void ClearFit()
+        {
+            if (fitted != null)
+            {
+                UnityEngine.Object.Destroy(fitted);
+            }
+
+            if (fittedTex != null)
+            {
+                UnityEngine.Object.Destroy(fittedTex);
+            }
+
+            fitted = null;
+            fittedTex = null;
+            fittedId = 0;
+        }
+
+        public static void Release()
+        {
+            ClearFit();
+            rendererScale.Clear();
         }
 
         static bool SamePerson(Sprite sprite, StoreClient client, Sprite big, string key)
@@ -397,6 +672,11 @@ namespace GuestMaidenCorrupt
         void LateUpdate()
         {
             HeaderPortrait.Tick();
+        }
+
+        void OnDestroy()
+        {
+            HeaderPortrait.Release();
         }
     }
 
