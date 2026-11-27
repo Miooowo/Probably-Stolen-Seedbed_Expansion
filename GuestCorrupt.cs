@@ -143,6 +143,7 @@ namespace GuestMaidenCorrupt
                 }
 
                 // 电子苗床的喂养进度（保持 5/5 显示，不隐藏）。
+                JacksonTrade.WriteNote(builder, item);
                 if (item.IsTag(ElectronicMaiden.Marker))
                 {
                     builder.AddLine(
@@ -253,6 +254,7 @@ namespace GuestMaidenCorrupt
 
         public static void FinishDelivery(GameItem tentacle)
         {
+            SpecialNpc.ReleaseIfGone();
             if (!pendingSuccess)
             {
                 if (!noticeRewritten && !string.IsNullOrEmpty(pendingFailText))
@@ -537,6 +539,12 @@ namespace GuestMaidenCorrupt
             {
                 Toast.Show(name + "被触手缠住了，但没能拖走。", "触手");
                 return null;
+            }
+
+            if (guest.IsTag(SpecialNpc.Marker))
+            {
+                maiden.EnableTag(SpecialNpc.Marker);
+                JacksonTrade.Keep(maiden, guest);
             }
 
             if (augmented)
@@ -854,13 +862,18 @@ namespace GuestMaidenCorrupt
         {
             try
             {
-                return GuestBox.CurrentItem;
+                GameItem shown = GuestBox.CurrentItem;
+                if (shown != null)
+                {
+                    return shown;
+                }
             }
             catch (Exception ex)
             {
                 Debug.LogWarning("[苗床顾客侵蚀] 读取当前顾客失败: " + ex.Message);
-                return null;
             }
+
+            return SpecialNpc.Current;
         }
 
         static bool GuestRemains()
