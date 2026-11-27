@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using HarmonyLib;
 using MidnightPawn.Game;
-using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -47,10 +46,8 @@ namespace GuestMaidenCorrupt
                 }
 
                 string key = SpriteKey(client);
-                PaintItem(GuestBox.CurrentItem as GameItemElement, big);
-                PaintItem(SpecialNpc.Current as GameItemElement, big);
-                PaintLoose(client, big, key);
-                PaintNearName(client.displayName, big, key);
+                PaintItem(GuestBox.CurrentItem as GameItemElement, client, big, key);
+                PaintItem(SpecialNpc.Current as GameItemElement, client, big, key);
                 if (noted != big)
                 {
                     noted = big;
@@ -67,119 +64,77 @@ namespace GuestMaidenCorrupt
             }
         }
 
-        static void PaintItem(GameItemElement card, Sprite big)
+        static void PaintItem(GameItemElement card, StoreClient client, Sprite big, string key)
         {
             if (card == null)
             {
                 return;
             }
 
-            Assign(card.background == null ? null : card.background.image, big);
-            Assign(card.fakeBackground == null ? null : card.fakeBackground.image, big);
+            Image face = card.background == null ? null : card.background.image;
+            Image drag = card.fakeBackground == null ? null : card.fakeBackground.image;
+            Assign(face, big);
+            Assign(drag, big);
+            ClearStacked(card, face, drag, client, big, key);
         }
 
-        static void PaintLoose(StoreClient client, Sprite big, string key)
+        static void ClearStacked(GameItemElement card, Image face, Image drag, StoreClient client, Sprite big, string key)
         {
-            Image[] images = UnityEngine.Object.FindObjectsOfType<Image>(true);
-            for (int i = 0; i < images.Length; i++)
-            {
-                Image image = images[i];
-                if (image == null || !image.gameObject.activeInHierarchy || IsChrome(image))
-                {
-                    continue;
-                }
-
-                if (SamePerson(image.sprite, client, big, key) || SamePerson(image.overrideSprite, client, big, key))
-                {
-                    Assign(image, big);
-                }
-            }
-
-            SpriteRenderer[] renderers = UnityEngine.Object.FindObjectsOfType<SpriteRenderer>(true);
-            for (int i = 0; i < renderers.Length; i++)
-            {
-                SpriteRenderer renderer = renderers[i];
-                if (renderer == null || !renderer.enabled || !renderer.gameObject.activeInHierarchy || Protected(renderer))
-                {
-                    continue;
-                }
-
-                if (SamePerson(renderer.sprite, client, big, key))
-                {
-                    Assign(renderer, big);
-                }
-            }
-        }
-
-        static void PaintNearName(string name, Sprite big, string key)
-        {
-            if (string.IsNullOrEmpty(name))
+            Transform scope = CardScope(card);
+            if (scope == null)
             {
                 return;
             }
 
-            TMP_Text[] labels = UnityEngine.Object.FindObjectsOfType<TMP_Text>(true);
-            for (int i = 0; i < labels.Length; i++)
-            {
-                TMP_Text label = labels[i];
-                if (label == null || !label.isActiveAndEnabled || label.text == null || label.text.Trim() != name)
-                {
-                    continue;
-                }
-
-                if (UnderDialogue(label.transform))
-                {
-                    continue;
-                }
-
-                Transform node = label.transform;
-                for (int depth = 0; depth < 8 && node != null; depth++)
-                {
-                    RectTransform rect = node as RectTransform;
-                    if (rect != null && (rect.rect.width > 520f || rect.rect.height > 640f))
-                    {
-                        break;
-                    }
-
-                    if (node.childCount > 24)
-                    {
-                        break;
-                    }
-
-                    PaintBranch(node, big);
-                    node = node.parent;
-                }
-            }
-        }
-
-        static void PaintBranch(Transform root, Sprite big)
-        {
-            Image[] images = root.GetComponentsInChildren<Image>(true);
+            Image[] images = scope.GetComponentsInChildren<Image>(true);
             for (int i = 0; i < images.Length; i++)
             {
                 Image image = images[i];
-                if (image == null || !image.gameObject.activeInHierarchy || IsChrome(image) || IsFrame(image.sprite))
+                if (image == null || image == face || image == drag || image.sprite == null || IsFrame(image.sprite))
                 {
                     continue;
                 }
 
-                if (image.sprite != null && image.sprite != big && PortraitSized(image.rectTransform))
+                bool ours = image.sprite.name == "guest-corner-fit";
+                bool oldPortrait = SamePerson(image.sprite, client, big, key) || SamePerson(image.overrideSprite, client, big, key);
+                if (!ours && !oldPortrait)
                 {
-                    Assign(image, big);
+                    continue;
                 }
-            }
 
-            SpriteRenderer[] renderers = root.GetComponentsInChildren<SpriteRenderer>(true);
-            for (int i = 0; i < renderers.Length; i++)
+                image.sprite = null;
+                image.overrideSprite = null;
+                image.enabled = false;
+            }
+        }
+
+        static Transform CardScope(GameItemElement card)
+        {
+            Transform node = card.handler != null ? card.handler.transform : (card.background == null ? null : card.background.transform);
+            if (node == null)
             {
-                SpriteRenderer renderer = renderers[i];
-                if (renderer == null || Protected(renderer) || renderer.sprite == null || renderer.sprite == big || IsFrame(renderer.sprite))
+                return null;
+            }
+
+            Transform scope = node;
+            for (int depth = 0; depth < 12 && node.parent != null; depth++)
+            {
+                node = node.parent;
+                if (node.childCount > 30)
                 {
-                    continue;
+                    break;
                 }
 
-                Assign(renderer, big);
+                RectTransform rect = node as RectTransform;
+                if (rect != null && (rect.rect.width > 720f || rect.rect.height > 820f))
+                {
+                    break;
+                }
+
+                scope = node;
             }
+
+            return scope;
         }
 
         static void Assign(Image image, Sprite big)
