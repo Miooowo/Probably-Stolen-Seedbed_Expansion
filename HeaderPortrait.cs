@@ -6,19 +6,18 @@ using UnityEngine.UI;
 
 namespace GuestMaidenCorrupt
 {
-    // 大窗口的立绘会被别的模组换成另一张图。左上角那张小立绘仍拿着原来的像素图。
-    // 顾客名字还在屏幕上时，把仍显示原像素图的小立绘换成大窗口正在用的那张。
+    // 别的模组会把 SpriteDict 里的立绘换成新图。大窗口之后取到的是新图，
+    // 左上角还握着换库之前的那张旧图。不能再拿「现在的图库」去认旧图。
     static class HeaderPortrait
     {
         static Sprite seen;
-        static int arm;
         static int cooldown;
         static bool logged;
 
         public static void Arm()
         {
-            arm = 120;
             cooldown = 0;
+            Tick();
         }
 
         public static void Tick()
@@ -30,30 +29,22 @@ namespace GuestMaidenCorrupt
                 if (client == null || big == null)
                 {
                     seen = null;
-                    arm = 0;
                     return;
                 }
 
                 if (big != seen)
                 {
                     seen = big;
-                    arm = 120;
                     cooldown = 0;
                 }
 
-                if (arm <= 0)
-                {
-                    return;
-                }
-
-                arm--;
                 if (cooldown > 0)
                 {
                     cooldown--;
                     return;
                 }
 
-                cooldown = 10;
+                cooldown = 8;
                 Apply(client, big);
             }
             catch (Exception ex)
@@ -68,40 +59,42 @@ namespace GuestMaidenCorrupt
 
         static void Apply(StoreClient client, Sprite big)
         {
-            string key = client.GetSprite();
-            Sprite vanilla = Vanilla(key);
-            if (vanilla == null || big == vanilla)
+            string key = null;
+            try
             {
-                return;
+                key = client.GetSprite();
+            }
+            catch
+            {
             }
 
-            string name = client.displayName;
-            if (string.IsNullOrEmpty(name) || !NameVisible(name))
-            {
-                return;
-            }
+            PaintNamed(big, key);
+            PaintBesideName(client.displayName, big);
+        }
 
-            Image[] images = UnityEngine.Object.FindObjectsOfType<Image>();
+        static void PaintNamed(Sprite big, string key)
+        {
+            Image[] images = UnityEngine.Object.FindObjectsOfType<Image>(true);
             for (int i = 0; i < images.Length; i++)
             {
                 Image image = images[i];
-                if (image == null || !image.isActiveAndEnabled)
+                if (image == null || !image.gameObject.activeInHierarchy || IsChrome(image))
                 {
                     continue;
                 }
 
-                if (ShowsVanilla(image.overrideSprite, vanilla))
+                if (IsStale(image.overrideSprite, big, key))
                 {
                     image.overrideSprite = big;
                 }
 
-                if (ShowsVanilla(image.sprite, vanilla))
+                if (IsStale(image.sprite, big, key))
                 {
                     image.sprite = big;
                 }
             }
 
-            SpriteRenderer[] renderers = UnityEngine.Object.FindObjectsOfType<SpriteRenderer>();
+            SpriteRenderer[] renderers = UnityEngine.Object.FindObjectsOfType<SpriteRenderer>(true);
             for (int i = 0; i < renderers.Length; i++)
             {
                 SpriteRenderer renderer = renderers[i];
@@ -110,11 +103,145 @@ namespace GuestMaidenCorrupt
                     continue;
                 }
 
-                if (ShowsVanilla(renderer.sprite, vanilla))
+                if (IsStale(renderer.sprite, big, key))
                 {
                     renderer.sprite = big;
                 }
             }
+        }
+
+        static void PaintBesideName(string name, Sprite big)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return;
+            }
+
+            TMP_Text[] labels = UnityEngine.Object.FindObjectsOfType<TMP_Text>(true);
+            for (int i = 0; i < labels.Length; i++)
+            {
+                TMP_Text label = labels[i];
+                if (label == null || !label.isActiveAndEnabled || label.text == null || label.text.Trim() != name)
+                {
+                    continue;
+                }
+
+                Transform panel = label.transform.parent;
+                if (panel == null)
+                {
+                    continue;
+                }
+
+                PaintPanel(panel, big);
+            }
+        }
+
+        static void PaintPanel(Transform panel, Sprite big)
+        {
+            for (int i = 0; i < panel.childCount; i++)
+            {
+                PaintNode(panel.GetChild(i), big);
+            }
+        }
+
+        static void PaintNode(Transform node, Sprite big)
+        {
+            if (node == null)
+            {
+                return;
+            }
+
+            Image image = node.GetComponent<Image>();
+            if (image != null && !IsChrome(image) && image.sprite != null && image.sprite != big && PortraitSized(image.rectTransform))
+            {
+                image.sprite = big;
+                if (image.overrideSprite != null && image.overrideSprite != big)
+                {
+                    image.overrideSprite = big;
+                }
+            }
+
+            SpriteRenderer renderer = node.GetComponent<SpriteRenderer>();
+            if (renderer != null && !Protected(renderer) && renderer.sprite != null && renderer.sprite != big)
+            {
+                renderer.sprite = big;
+            }
+
+            for (int i = 0; i < node.childCount; i++)
+            {
+                Transform child = node.GetChild(i);
+                Image nested = child.GetComponent<Image>();
+                if (nested != null && !IsChrome(nested) && nested.sprite != null && nested.sprite != big && PortraitSized(nested.rectTransform))
+                {
+                    nested.sprite = big;
+                    if (nested.overrideSprite != null && nested.overrideSprite != big)
+                    {
+                        nested.overrideSprite = big;
+                    }
+                }
+            }
+        }
+
+        static bool PortraitSized(RectTransform rect)
+        {
+            if (rect == null)
+            {
+                return false;
+            }
+
+            float width = rect.rect.width;
+            float height = rect.rect.height;
+            if (width < 24f || height < 24f || width > 420f || height > 520f)
+            {
+                return false;
+            }
+
+            float ratio = width / height;
+            return ratio >= 0.45f && ratio <= 1.8f;
+        }
+
+        static bool IsStale(Sprite sprite, Sprite big, string key)
+        {
+            if (sprite == null || sprite == big)
+            {
+                return false;
+            }
+
+            string spriteName = sprite.name;
+            if (string.IsNullOrEmpty(spriteName))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(key) && string.Equals(spriteName, key, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            string bigName = big == null ? null : big.name;
+            return !string.IsNullOrEmpty(bigName)
+                && string.Equals(spriteName, bigName, System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        static bool IsChrome(Image image)
+        {
+            DialogUIManager dialog = DialogUIManager.Instance;
+            if (dialog == null)
+            {
+                return false;
+            }
+
+            if (dialog.clientNameBubbleImage != null && image == dialog.clientNameBubbleImage)
+            {
+                return true;
+            }
+
+            if (dialog.clientNameBubble != null && image.transform.IsChildOf(dialog.clientNameBubble.transform))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         static StoreClient Current()
@@ -135,118 +262,44 @@ namespace GuestMaidenCorrupt
 
         static Sprite Big()
         {
-            StoreClientMono mono = StoreClientMono.Instance;
-            if (mono != null && mono.image != null && mono.image.sprite != null)
-            {
-                return mono.image.sprite;
-            }
-
             StoreUIManager ui = StoreUIManager.Instance;
-            if (ui != null && ui.clientGameObject != null && ui.clientGameObject.image != null)
+            if (ui != null && ui.clientGameObject != null && ui.clientGameObject.image != null && ui.clientGameObject.image.sprite != null)
             {
                 return ui.clientGameObject.image.sprite;
+            }
+
+            StoreClientMono mono = StoreClientMono.Instance;
+            if (mono != null && mono.image != null)
+            {
+                return mono.image.sprite;
             }
 
             return null;
         }
 
-        static Sprite Vanilla(string key)
-        {
-            SpriteDict dict = SpriteDict.Instance;
-            if (dict == null || dict.spriteDictionary == null || string.IsNullOrEmpty(key))
-            {
-                return null;
-            }
-
-            Sprite sprite;
-            if (!dict.spriteDictionary.TryGetValue(key, out sprite))
-            {
-                return null;
-            }
-
-            return sprite;
-        }
-
-        static bool ShowsVanilla(Sprite sprite, Sprite vanilla)
-        {
-            if (sprite == null || vanilla == null)
-            {
-                return false;
-            }
-
-            if (sprite == vanilla)
-            {
-                return true;
-            }
-
-            return sprite.texture == vanilla.texture && sprite.rect == vanilla.rect;
-        }
-
         static bool Protected(SpriteRenderer renderer)
         {
-            StoreClientMono mono = StoreClientMono.Instance;
-            if (mono != null && mono.image == renderer)
-            {
-                return true;
-            }
-
             StoreUIManager ui = StoreUIManager.Instance;
-            if (ui == null)
+            if (ui != null)
             {
-                return false;
-            }
-
-            if (ui.clientGameObject != null && ui.clientGameObject.image == renderer)
-            {
-                return true;
-            }
-
-            if (ui.secGameObject != null && ui.secGameObject.image == renderer)
-            {
-                return true;
-            }
-
-            if (ui.secGameObject2 != null && ui.secGameObject2.image == renderer)
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        static bool NameVisible(string name)
-        {
-            TMP_Text[] labels = UnityEngine.Object.FindObjectsOfType<TMP_Text>();
-            for (int i = 0; i < labels.Length; i++)
-            {
-                TMP_Text label = labels[i];
-                if (label == null || !label.isActiveAndEnabled || label.text == null)
+                if (ui.clientGameObject != null && ui.clientGameObject.image == renderer)
                 {
-                    continue;
+                    return true;
                 }
 
-                if (label.text.Trim() == name)
+                if (ui.secGameObject != null && ui.secGameObject.image == renderer)
+                {
+                    return true;
+                }
+
+                if (ui.secGameObject2 != null && ui.secGameObject2.image == renderer)
                 {
                     return true;
                 }
             }
 
-            Text[] plain = UnityEngine.Object.FindObjectsOfType<Text>();
-            for (int i = 0; i < plain.Length; i++)
-            {
-                Text label = plain[i];
-                if (label == null || !label.isActiveAndEnabled || label.text == null)
-                {
-                    continue;
-                }
-
-                if (label.text.Trim() == name)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            StoreClientMono mono = StoreClientMono.Instance;
+            return mono != null && mono.image == renderer;
         }
     }
 
@@ -284,18 +337,6 @@ namespace GuestMaidenCorrupt
         static void Postfix()
         {
             HeaderPortrait.Arm();
-            HeaderPortrait.Tick();
-        }
-    }
-
-    [HarmonyPatch(typeof(NegociationUIManager), "RefreshClientHeader")]
-    [HarmonyPriority(Priority.Last)]
-    static class HeaderPortraitOnHeader
-    {
-        static void Postfix()
-        {
-            HeaderPortrait.Arm();
-            HeaderPortrait.Tick();
         }
     }
 }
