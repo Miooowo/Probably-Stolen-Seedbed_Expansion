@@ -7,12 +7,12 @@ using UnityEngine.UI;
 
 namespace GuestMaidenCorrupt
 {
-    // 立绘模组只把大窗口（StoreClientMono）换成当前那张图。
-    // 左上角只改可拖动的那一张。先裁掉空白，再用最近邻缩进
-    // 48×48 的游戏像素，居中放进格子，不另叠一层。
+    // 立绘模组只把大窗口换成当前那张图。左上角只改可拖动的那一张。
+    // 原客人格是 64×64，高清管理器在同一 4×4 格里用 128 或 256 的纹理（默认 256）。
+    // 这里按格子的真实像素显示，纹理保持 256，最近邻，不把高清图压成小图再放大。
     static class HeaderPortrait
     {
-        const int FitSize = 48;
+        const int TextureSize = 256;
         const int SampleSize = 256;
 
         static bool logged;
@@ -175,8 +175,20 @@ namespace GuestMaidenCorrupt
                 rect.anchoredPosition = Vector2.zero;
             }
 
-            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, FitSize);
-            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, FitSize);
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, SlotPixels());
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, SlotPixels());
+        }
+
+        static float SlotPixels()
+        {
+            UISettings settings = UISettings.current;
+            int grid = settings != null ? settings.gridSize : 0;
+            if (grid > 0)
+            {
+                return grid * 4f;
+            }
+
+            return 64f;
         }
 
         static void Assign(SpriteRenderer renderer, Sprite big)
@@ -230,7 +242,9 @@ namespace GuestMaidenCorrupt
                 return null;
             }
 
-            Sprite sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100f, 0, SpriteMeshType.FullRect);
+            float slot = SlotPixels();
+            float ppu = 100f * texture.width / Mathf.Max(1f, slot);
+            Sprite sprite = Sprite.Create(texture, new Rect(0f, 0f, texture.width, texture.height), new Vector2(0.5f, 0.5f), ppu, 0, SpriteMeshType.FullRect);
             sprite.name = "guest-corner-fit";
             sprite.hideFlags = HideFlags.HideAndDontSave;
             texture.hideFlags = HideFlags.HideAndDontSave;
@@ -291,29 +305,41 @@ namespace GuestMaidenCorrupt
                 }
             }
 
-            float contentW = (x1 - x0 + 1) / (float)visW * used.width;
-            float contentH = (y1 - y0 + 1) / (float)visH * used.height;
+            float u0 = x0 / (float)visW;
+            float v0 = y0 / (float)visH;
+            float u1 = (x1 + 1f) / visW;
+            float v1 = (y1 + 1f) / visH;
+            Rect tight = new Rect(
+                used.x + used.width * u0,
+                used.y + used.height * v0,
+                Mathf.Max(1f, used.width * (u1 - u0)),
+                Mathf.Max(1f, used.height * (v1 - v0)));
+            Color32[] detail = ReadRegion(source, tight, TextureSize, TextureSize);
+            if (detail == null)
+            {
+                return null;
+            }
+
+            detail = Orient(detail, TextureSize, TextureSize, big.packingRotation, out visW, out visH);
             int drawW;
             int drawH;
-            FitBox(contentW, contentH, out drawW, out drawH);
-            Color32[] canvas = new Color32[FitSize * FitSize];
-            int ox = (FitSize - drawW) / 2;
-            int oy = (FitSize - drawH) / 2;
-            int spanX = x1 - x0;
-            int spanY = y1 - y0;
+            FitBox(tight.width, tight.height, out drawW, out drawH);
+            Color32[] canvas = new Color32[TextureSize * TextureSize];
+            int ox = (TextureSize - drawW) / 2;
+            int oy = (TextureSize - drawH) / 2;
             for (int y = 0; y < drawH; y++)
             {
-                int sy = y0 + (drawH < 2 ? 0 : y * spanY / (drawH - 1));
+                int sy = drawH < 2 ? 0 : y * (visH - 1) / (drawH - 1);
                 int row = sy * visW;
-                int to = (oy + y) * FitSize + ox;
+                int to = (oy + y) * TextureSize + ox;
                 for (int x = 0; x < drawW; x++)
                 {
-                    int sx = x0 + (drawW < 2 ? 0 : x * spanX / (drawW - 1));
-                    canvas[to + x] = visual[row + sx];
+                    int sx = drawW < 2 ? 0 : x * (visW - 1) / (drawW - 1);
+                    canvas[to + x] = detail[row + sx];
                 }
             }
 
-            Texture2D texture = new Texture2D(FitSize, FitSize, TextureFormat.RGBA32, false);
+            Texture2D texture = new Texture2D(TextureSize, TextureSize, TextureFormat.RGBA32, false);
             texture.wrapMode = TextureWrapMode.Clamp;
             texture.filterMode = FilterMode.Point;
             texture.anisoLevel = 0;
@@ -334,9 +360,9 @@ namespace GuestMaidenCorrupt
                 height = 1f;
             }
 
-            float scale = Mathf.Min(FitSize / width, FitSize / height);
-            drawW = Mathf.Clamp(Mathf.RoundToInt(width * scale), 1, FitSize);
-            drawH = Mathf.Clamp(Mathf.RoundToInt(height * scale), 1, FitSize);
+            float scale = Mathf.Min(TextureSize / width, TextureSize / height);
+            drawW = Mathf.Clamp(Mathf.RoundToInt(width * scale), 1, TextureSize);
+            drawH = Mathf.Clamp(Mathf.RoundToInt(height * scale), 1, TextureSize);
         }
 
         static bool OpaqueBounds(Color32[] pixels, int width, int height, out int x0, out int y0, out int x1, out int y1)
