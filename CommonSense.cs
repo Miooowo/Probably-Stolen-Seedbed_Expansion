@@ -8,6 +8,7 @@ namespace GuestMaidenCorrupt
     static class CommonSense
     {
         public const string Name = "常识改变";
+        public const string SpokenLine = "嗯……啊……，请问主人……，有什么需要呢？";
         const string BuyId = "commonSenseBuying";
         const string SellId = "commonSenseSelling";
         const int Percent = 35;
@@ -26,9 +27,15 @@ namespace GuestMaidenCorrupt
                     return;
                 }
 
+                bool fresh = !ReferenceEquals(marked, client);
                 marked = client;
                 Refresh();
                 VisitGrid(OnClient);
+                if (fresh)
+                {
+                    Say(client);
+                }
+
                 Debug.Log("[苗床顾客侵蚀] 常识改变：买入价 -" + Percent + "%，卖出价 +" + Percent + "%，可与香水叠加");
             }
             catch (Exception ex)
@@ -120,10 +127,63 @@ namespace GuestMaidenCorrupt
             }
         }
 
-        static bool Active()
+        public static bool Active()
         {
             StoreClient client = Current();
             return client != null && ReferenceEquals(client, marked);
+        }
+
+        public static bool TryLabeledWater(GameItem item, out int purity, out string display)
+        {
+            purity = 0;
+            display = null;
+            if (item == null || !item.IsTag("LIQUID_CONTAINER_TAG"))
+            {
+                return false;
+            }
+
+            ItemFeature feature = WaterFeatureHelper.GetWaterFeature(item);
+            if (feature == null)
+            {
+                return false;
+            }
+
+            purity = feature.IsExposed() ? WaterHelper.GetWaterPurity(item) : feature.customIntValue1;
+            ItemCondition condition = feature.GetCurrentItemCondition();
+            if (!feature.IsExposed() && purity <= 0 && condition != null && condition.customValue > 0)
+            {
+                purity = condition.customValue;
+            }
+
+            display = WaterFeatureHelper.GetWaterDisplayName(purity);
+            if (condition != null && !string.IsNullOrEmpty(condition.display))
+            {
+                display = condition.display;
+            }
+
+            return true;
+        }
+
+        static void Say(StoreClient client)
+        {
+            try
+            {
+                DialogUIManager ui = DialogUIManager.Instance;
+                if (ui == null)
+                {
+                    return;
+                }
+
+                string speaker = string.IsNullOrEmpty(client.displayName) ? "CLIENT" : client.displayName;
+                Dialogue dialogue = new Dialogue();
+                dialogue.SetText(speaker, SpokenLine);
+                dialogue.priority = Dialogue.IMPORTANT_PRIORITY;
+                ui.StartDialogue(dialogue, true);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[苗床顾客侵蚀] 常识改变台词失败: " + ex.Message);
+            }
         }
 
         static StoreClient Current()

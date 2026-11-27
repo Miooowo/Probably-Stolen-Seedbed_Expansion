@@ -195,6 +195,8 @@ namespace GuestMaidenCorrupt
             }
 
             GameItem tentacle = targetItem != null && targetItem.identifier == "corrupt_tentacle" ? targetItem : sourceItem;
+            // 成功率另起一行。AddLine 的换行要等下一次写入才进文本，横幅在这里就 Build，所以先断行。
+            customBuilder.NextLine();
             GuestCorrupt.WriteChance(customBuilder, guest, tentacle);
             __result = customBuilder.Build();
             return false;
