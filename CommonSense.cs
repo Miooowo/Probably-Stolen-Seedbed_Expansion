@@ -133,37 +133,6 @@ namespace GuestMaidenCorrupt
             return client != null && ReferenceEquals(client, marked);
         }
 
-        public static bool TryLabeledWater(GameItem item, out int purity, out string display)
-        {
-            purity = 0;
-            display = null;
-            if (item == null || !item.IsTag("LIQUID_CONTAINER_TAG"))
-            {
-                return false;
-            }
-
-            ItemFeature feature = WaterFeatureHelper.GetWaterFeature(item);
-            if (feature == null)
-            {
-                return false;
-            }
-
-            purity = feature.IsExposed() ? WaterHelper.GetWaterPurity(item) : feature.customIntValue1;
-            ItemCondition condition = feature.GetCurrentItemCondition();
-            if (!feature.IsExposed() && purity <= 0 && condition != null && condition.customValue > 0)
-            {
-                purity = condition.customValue;
-            }
-
-            display = WaterFeatureHelper.GetWaterDisplayName(purity);
-            if (condition != null && !string.IsNullOrEmpty(condition.display))
-            {
-                display = condition.display;
-            }
-
-            return true;
-        }
-
         static void Say(StoreClient client)
         {
             try
