@@ -8,12 +8,12 @@ using UnityEngine.UI;
 namespace GuestMaidenCorrupt
 {
     // 立绘模组只把大窗口（StoreClientMono）换成当前那张图。
-    // 左上角是小框。直接把高清大图塞进去会按九宫格/紧网格切开，
-    // 手机上大贴图还会撕成横条，底部伸出面板。这里先缩成一张
-    // 完整小图，再放进原来的框。
+    // 左上角只改可拖动的那一张。先裁掉空白，再用最近邻缩进
+    // 48×48 的游戏像素，居中放进格子，不另叠一层。
     static class HeaderPortrait
     {
-        const int FitSize = 128;
+        const int FitSize = 48;
+        const int SampleSize = 256;
 
         static bool logged;
         static Sprite noted;
@@ -73,8 +73,8 @@ namespace GuestMaidenCorrupt
 
             Image face = card.background == null ? null : card.background.image;
             Image drag = card.fakeBackground == null ? null : card.fakeBackground.image;
-            Assign(face, big);
-            Assign(drag, big);
+            Assign(face, big, true);
+            Assign(drag, big, true);
             ClearStacked(card, face, drag, client, big, key);
         }
 
@@ -137,7 +137,7 @@ namespace GuestMaidenCorrupt
             return scope;
         }
 
-        static void Assign(Image image, Sprite big)
+        static void Assign(Image image, Sprite big, bool center)
         {
             if (image == null || big == null)
             {
@@ -150,19 +150,33 @@ namespace GuestMaidenCorrupt
                 return;
             }
 
-            if (image.sprite == sprite && image.overrideSprite == null && image.type == Image.Type.Simple && !image.useSpriteMesh)
+            if (image.sprite != sprite || image.overrideSprite != null || image.type != Image.Type.Simple || image.useSpriteMesh)
+            {
+                image.type = Image.Type.Simple;
+                image.useSpriteMesh = false;
+                image.preserveAspect = true;
+                image.pixelsPerUnitMultiplier = 1f;
+                image.sprite = sprite;
+                image.overrideSprite = null;
+            }
+
+            RectTransform rect = image.rectTransform;
+            if (rect == null)
             {
                 return;
             }
 
-            Vector2 size = image.rectTransform.sizeDelta;
-            image.type = Image.Type.Simple;
-            image.useSpriteMesh = false;
-            image.preserveAspect = true;
-            image.pixelsPerUnitMultiplier = 1f;
-            image.sprite = sprite;
-            image.overrideSprite = null;
-            image.rectTransform.sizeDelta = size;
+            if (center)
+            {
+                rect.localScale = Vector3.one;
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.anchoredPosition = Vector2.zero;
+            }
+
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, FitSize);
+            rect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, FitSize);
         }
 
         static void Assign(SpriteRenderer renderer, Sprite big)
@@ -247,64 +261,123 @@ namespace GuestMaidenCorrupt
             region.width = Mathf.Clamp(region.width, 1f, texW - region.x);
             region.height = Mathf.Clamp(region.height, 1f, texH - region.y);
 
-            int storedW = Block(region.width, region.height);
-            int storedH = Block(region.height, region.width);
-            Color32[] stored = ReadRegion(source, region, storedW, storedH);
+            Rect used = region;
+            Color32[] stored = ReadRegion(source, used, SampleSize, SampleSize);
             if (stored == null)
             {
                 return null;
             }
 
-            if (!HasInk(stored))
+            int visW;
+            int visH;
+            Color32[] visual = Orient(stored, SampleSize, SampleSize, big.packingRotation, out visW, out visH);
+            int x0;
+            int y0;
+            int x1;
+            int y1;
+            if (!OpaqueBounds(visual, visW, visH, out x0, out y0, out x1, out y1))
             {
-                stored = ReadRegion(source, new Rect(0f, 0f, texW, texH), storedW, storedH);
-                if (stored == null || !HasInk(stored))
+                used = new Rect(0f, 0f, texW, texH);
+                stored = ReadRegion(source, used, SampleSize, SampleSize);
+                if (stored == null)
+                {
+                    return null;
+                }
+
+                visual = Orient(stored, SampleSize, SampleSize, big.packingRotation, out visW, out visH);
+                if (!OpaqueBounds(visual, visW, visH, out x0, out y0, out x1, out y1))
                 {
                     return null;
                 }
             }
 
-            int visW;
-            int visH;
-            Color32[] visual = Orient(stored, storedW, storedH, big.packingRotation, out visW, out visH);
-            int drawW = Block(visW, visH);
-            int drawH = Block(visH, visW);
-            if (drawW != visW || drawH != visH)
-            {
-                visual = Scale(visual, visW, visH, drawW, drawH);
-            }
-
+            float contentW = (x1 - x0 + 1) / (float)visW * used.width;
+            float contentH = (y1 - y0 + 1) / (float)visH * used.height;
+            int drawW;
+            int drawH;
+            FitBox(contentW, contentH, out drawW, out drawH);
             Color32[] canvas = new Color32[FitSize * FitSize];
             int ox = (FitSize - drawW) / 2;
             int oy = (FitSize - drawH) / 2;
+            int spanX = x1 - x0;
+            int spanY = y1 - y0;
             for (int y = 0; y < drawH; y++)
             {
-                int from = y * drawW;
+                int sy = y0 + (drawH < 2 ? 0 : y * spanY / (drawH - 1));
+                int row = sy * visW;
                 int to = (oy + y) * FitSize + ox;
-                Array.Copy(visual, from, canvas, to, drawW);
+                for (int x = 0; x < drawW; x++)
+                {
+                    int sx = x0 + (drawW < 2 ? 0 : x * spanX / (drawW - 1));
+                    canvas[to + x] = visual[row + sx];
+                }
             }
 
             Texture2D texture = new Texture2D(FitSize, FitSize, TextureFormat.RGBA32, false);
             texture.wrapMode = TextureWrapMode.Clamp;
-            texture.filterMode = FilterMode.Bilinear;
+            texture.filterMode = FilterMode.Point;
             texture.anisoLevel = 0;
             texture.SetPixels32(canvas);
             texture.Apply(false, true);
             return texture;
         }
 
-        static int Block(float along, float other)
+        static void FitBox(float width, float height, out int drawW, out int drawH)
         {
-            float aspect = other < 1f ? 1f : along / other;
-            int size = aspect >= 1f ? FitSize : Mathf.RoundToInt(FitSize * aspect);
-            size = Mathf.Clamp(size, 4, FitSize);
-            int pot = 4;
-            while (pot * 2 <= size)
+            if (width < 1f)
             {
-                pot *= 2;
+                width = 1f;
             }
 
-            return pot;
+            if (height < 1f)
+            {
+                height = 1f;
+            }
+
+            float scale = Mathf.Min(FitSize / width, FitSize / height);
+            drawW = Mathf.Clamp(Mathf.RoundToInt(width * scale), 1, FitSize);
+            drawH = Mathf.Clamp(Mathf.RoundToInt(height * scale), 1, FitSize);
+        }
+
+        static bool OpaqueBounds(Color32[] pixels, int width, int height, out int x0, out int y0, out int x1, out int y1)
+        {
+            x0 = width;
+            y0 = height;
+            x1 = -1;
+            y1 = -1;
+            for (int y = 0; y < height; y++)
+            {
+                int row = y * width;
+                for (int x = 0; x < width; x++)
+                {
+                    if (pixels[row + x].a <= 8)
+                    {
+                        continue;
+                    }
+
+                    if (x < x0)
+                    {
+                        x0 = x;
+                    }
+
+                    if (x > x1)
+                    {
+                        x1 = x;
+                    }
+
+                    if (y < y0)
+                    {
+                        y0 = y;
+                    }
+
+                    if (y > y1)
+                    {
+                        y1 = y;
+                    }
+                }
+            }
+
+            return x1 >= 0;
         }
 
         static Color32[] ReadRegion(Texture source, Rect region, int width, int height)
@@ -313,7 +386,7 @@ namespace GuestMaidenCorrupt
             float texH = source.height;
             RenderTexture previous = RenderTexture.active;
             RenderTexture buffer = RenderTexture.GetTemporary(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Default);
-            buffer.filterMode = FilterMode.Bilinear;
+            buffer.filterMode = FilterMode.Point;
             buffer.wrapMode = TextureWrapMode.Clamp;
             Texture2D read = null;
             try
