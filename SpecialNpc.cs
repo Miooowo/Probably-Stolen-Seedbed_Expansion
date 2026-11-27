@@ -192,11 +192,12 @@ namespace GuestMaidenCorrupt
 
         static string IdentityKey(StoreClient client, string name)
         {
-            string id = client.identifier;
-            if (id == "inventor" || id == "inventorStorage")
+            if (JacksonTrade.IsJackson(client))
             {
                 return "special:inventor";
             }
+
+            string id = client.identifier;
 
             if (string.IsNullOrEmpty(id))
             {

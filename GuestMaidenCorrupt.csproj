@@ -12,9 +12,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Tests/**" />
-    <None Remove="Tests/**" />
-    <EmbeddedResource Remove="Tests/**" />
+    <Compile Remove="Tests/**;_decomp/**;_scan/**" />
+    <None Remove="Tests/**;_decomp/**;_scan/**" />
+    <EmbeddedResource Remove="Tests/**;_decomp/**;_scan/**" />
   </ItemGroup>
 
   <ItemGroup>

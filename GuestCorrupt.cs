@@ -34,6 +34,12 @@ namespace GuestMaidenCorrupt
         static int realCharge = -1;
         static int chanceFrame = -1;
         static GameItem chanceItem;
+        static RichTextBuilder chanceBuilder;
+
+        static void WriteTooltip(RichTextBuilder builder, GameItem item)
+        {
+            WriteChance(builder, item);
+        }
 
         public static void Register()
         {
@@ -44,6 +50,7 @@ namespace GuestMaidenCorrupt
 
             TentacleApi.RegisterCorruptible(ModEntry.ModId, IsCurrentGuest, Convert);
             ModHook.OnWakingUpLate += BroodSync.OnMorningSync;
+            ModHook.OnCreateTooltipLate += WriteTooltip;
             registered = true;
         }
 
@@ -55,6 +62,7 @@ namespace GuestMaidenCorrupt
             }
 
             ModHook.OnWakingUpLate -= BroodSync.OnMorningSync;
+            ModHook.OnCreateTooltipLate -= WriteTooltip;
             registered = false;
         }
 
@@ -73,12 +81,13 @@ namespace GuestMaidenCorrupt
 
             // 防重复：同一帧内同一物品只追加一次。主游戏里 GameItemElement.GetTooltip / GetTooltipAdvanced
             // 都会调用 ModSourceHelper.CreateTooltip，会走两条路径各写一次，导致重复行。
-            if (chanceItem == item && chanceFrame == Time.frameCount)
+            if (chanceItem == item && chanceBuilder == builder && chanceFrame == Time.frameCount)
             {
                 return;
             }
 
             chanceItem = item;
+            chanceBuilder = builder;
             chanceFrame = Time.frameCount;
 
             if (guest)

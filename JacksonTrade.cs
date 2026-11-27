@@ -25,14 +25,48 @@ namespace GuestMaidenCorrupt
                 return false;
             }
 
-            if (client.identifier == "inventor" || client.identifier == "inventorStorage")
+            string id = client.identifier ?? "";
+            if (id == "inventor" || id == "inventorStorage" || id == "inventorIntro" || id == "inventorModuleIntro")
             {
                 return true;
             }
 
-            string sprite = client.spriteName;
-            return !string.IsNullOrEmpty(sprite)
-                && sprite.IndexOf("jackson", StringComparison.OrdinalIgnoreCase) >= 0;
+            string sprite = client.spriteName ?? "";
+            if (sprite.Equals("inventor", StringComparison.OrdinalIgnoreCase)
+                || sprite.IndexOf("jackson", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return true;
+            }
+
+            string called = client.displayName ?? "";
+            return called.IndexOf("杰克逊", StringComparison.Ordinal) >= 0;
+        }
+
+        public static bool IsMaiden(GameItem item)
+        {
+            if (item == null || !item.IsTag("MAIDEN_FEMALE"))
+            {
+                return false;
+            }
+
+            if (item.IsTag(Marker))
+            {
+                return true;
+            }
+
+            string name = ItemFactory.GetStr(item, "MAIDEN_NAME");
+            string key = ItemFactory.GetStr(item, "MAIDEN_IDENTITY_KEY");
+            string job = ItemFactory.GetStr(item, "MAIDEN_JOB");
+            bool match = (!string.IsNullOrEmpty(name) && name.IndexOf("杰克逊", StringComparison.Ordinal) >= 0)
+                || (!string.IsNullOrEmpty(key) && key.StartsWith("special:inventor", StringComparison.Ordinal))
+                || (!string.IsNullOrEmpty(job) && job.StartsWith("inventor", StringComparison.Ordinal));
+            if (!match)
+            {
+                return false;
+            }
+
+            item.EnableTag(Marker);
+            return true;
         }
 
         public static void Keep(GameItem maiden, GameItem source)
@@ -48,7 +82,7 @@ namespace GuestMaidenCorrupt
 
         public static void WriteNote(RichTextBuilder builder, GameItem item)
         {
-            if (builder == null || item == null || !item.IsTag(Marker))
+            if (builder == null || item == null || !IsMaiden(item))
             {
                 return;
             }
@@ -249,7 +283,7 @@ namespace GuestMaidenCorrupt
                 for (int i = 0; i < owned.Count; i++)
                 {
                     GameItem item = owned[i];
-                    if (item == null || !item.IsTag(Marker))
+                    if (!IsMaiden(item))
                     {
                         continue;
                     }
