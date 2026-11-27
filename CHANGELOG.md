@@ -3,9 +3,9 @@
 本文件记录苗床顾客侵蚀（GuestMaidenCorrupt）的显著变更。
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
-`manifest.xml` 中的版本号一直是 `0.1.0-demo`，因此下面按日期分节，新的在前。未提交的改动放在 `[未发布]`。
+当前版本是 `0.2.0-demo`。新的在前。
 
-## [未发布]
+## [0.2.0-demo] - 2026-11-27
 
 ### 新增
 
